@@ -71,15 +71,22 @@ export default function ManageScreen() {
       const form = new FormData();
       const ext  = file.uri.split('.').pop() || 'jpg';
       const mime = file.type === 'video' ? `video/${ext}` : `image/${ext}`;
-      // @ts-ignore
-      form.append('file', { uri: file.uri, name: `upload.${ext}`, type: mime });
+
+      if (Platform.OS === 'web') {
+        const response = await fetch(file.uri);
+        const blob = await response.blob();
+        form.append('file', new Blob([blob], { type: mime }), `upload.${ext}`);
+      } else {
+        // @ts-ignore
+        form.append('file', { uri: file.uri, name: `upload.${ext}`, type: mime });
+      }
       form.append('caption', caption);
       form.append('date', date || new Date().toISOString());
 
+      // Content-Type header set etme - tarayici boundary otomatik ekler
       const res = await fetch(`${API_BASE}/api/memories`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'multipart/form-data' },
-        body:    form,
+        method: 'POST',
+        body:   form,
       });
       if (!res.ok) throw new Error('Upload failed');
       setFile(null);
