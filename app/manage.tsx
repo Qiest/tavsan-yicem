@@ -79,11 +79,19 @@ export default function ManageScreen() {
       allowsEditing: false,
     });
     if (!result.canceled && result.assets.length > 0) {
-      setFile(result.assets[0]);
+      const asset = result.assets[0];
+      const ext = asset.uri.split('.').pop()?.toLowerCase() || '';
+      // Web'de HEIC desteklenmiyor, kullanıcıyı uyar
+      if (Platform.OS === 'web' && (ext === 'heic' || ext === 'heif')) {
+        window.alert('HEIC formatı web tarayıcısında desteklenmiyor.\n\nLütfen iPhone Ayarlar → Kamera → Format → "En Uyumlu" seçeneğini aktif et. Bu sayede fotoğraflar JPEG olarak kaydedilir.');
+        return;
+      }
+      setFile(asset);
     }
   };
 
   const handleUpload = async () => {
+    if (Platform.OS === 'web') { window.alert('Platform: web'); } else { Alert.alert('Platform: ' + Platform.OS); }
     if (!file) { Alert.alert('Please select a file first!'); return; }
     setUploading(true);
     try {
