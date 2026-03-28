@@ -1,32 +1,14 @@
 {
-  "routes": [
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
     {
-      "src": "/sw.js",
-      "dest": "/sw.js",
-      "headers": {
-        "Service-Worker-Allowed": "/",
-        "Cache-Control": "no-cache"
-      }
-    },
-    {
-      "src": "/icon.png",
-      "dest": "/icon.png"
-    },
-    {
-      "src": "/manifest.json",
-      "dest": "/manifest.json"
-    },
-    {
-      "src": "/assets/(.*)",
-      "dest": "/assets/$1"
-    },
-    {
-      "src": "/_expo/(.*)",
-      "dest": "/_expo/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Service-Worker-Allowed", "value": "/" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
     }
   ]
 }
