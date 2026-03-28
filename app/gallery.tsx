@@ -53,7 +53,7 @@ function LoveHeader({
   return (
     <Animated.View style={{ opacity: fadeIn }}>
       <LinearGradient colors={['#ff6b8a', '#ffb3c1', '#ffd6e0']} style={cs.header}>
-        <Text style={cs.headerTitle}>🐰 Şapşal Tavşan</Text>
+        <Text style={cs.headerTitle}>Tavşan 🐰</Text>
         <Text style={cs.headerPoem}>Every second with you is a memory I keep forever</Text>
 
         <View style={cs.counterRow}>
@@ -272,7 +272,7 @@ export default function GalleryScreen() {
     <MemoryCard item={item} onPress={() => setSelected(item)} />
   );
 
-  const STATUS_EMOJIS = ['🐰', '😍', '🥰', '💕', '😴', '🎵', '🌸', '✨', '💔', '🤍'];
+  const STATUS_EMOJIS = ['😭', '😍', '🥰', '💕', '😴', '🥱', '🌸', '✨', '💔', '🧡'];
 
   return (
     <View style={gs.container}>
