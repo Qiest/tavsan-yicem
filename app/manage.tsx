@@ -18,6 +18,25 @@ interface Memory {
   fileType: string;
 }
 
+// Web'de HEIC dosyasını JPEG'e çevir
+async function convertHeicToJpeg(uri: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width  = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('canvas error')); return; }
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => reject(new Error('image load error'));
+    img.src = uri;
+  });
+}
+
 export default function ManageScreen() {
   const router = useRouter();
   const [role, setRole]         = useState('');
@@ -73,9 +92,22 @@ export default function ManageScreen() {
       const mime = file.type === 'video' ? `video/${ext}` : `image/${ext}`;
 
       if (Platform.OS === 'web') {
-        const response = await fetch(file.uri);
+        let uri = file.uri;
+        let finalMime = mime;
+        let finalExt = ext;
+        // HEIC ise önce JPEG'e çevir
+        if (ext.toLowerCase() === 'heic' || ext.toLowerCase() === 'heif' || mime.includes('heic') || mime.includes('heif')) {
+          try {
+            uri = await convertHeicToJpeg(file.uri);
+            finalMime = 'image/jpeg';
+            finalExt = 'jpg';
+          } catch (e) {
+            // Çevrilemezse olduğu gibi gönder
+          }
+        }
+        const response = await fetch(uri);
         const blob = await response.blob();
-        form.append('file', new Blob([blob], { type: mime }), `upload.${ext}`);
+        form.append('file', new Blob([blob], { type: finalMime }), `upload.${finalExt}`);
       } else {
         // @ts-ignore
         form.append('file', { uri: file.uri, name: `upload.${ext}`, type: mime });
