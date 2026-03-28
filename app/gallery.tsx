@@ -157,19 +157,71 @@ export default function GalleryScreen() {
   const [memories,  setMemories] = useState<Memory[]>([]);
   const [refreshing, setRefresh] = useState(false);
   const [selected,   setSelected] = useState<Memory | null>(null);
+  const [status,     setStatus]   = useState({ emoji: '🐰', text: '' });
+  const [song,       setSong]     = useState({ url: '', title: '' });
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showSongModal,   setShowSongModal]   = useState(false);
+  const [newEmoji,   setNewEmoji]   = useState('');
+  const [newText,    setNewText]    = useState('');
+  const [newSongUrl,  setNewSongUrl]  = useState('');
+  const [newSongTitle, setNewSongTitle] = useState('');
 
   useEffect(() => {
     (async () => {
       const r = await storage.getItem('role');
       if (!r) {
-        // Giriş yapılmamış, login'e gönder
         router.replace('/login');
         return;
       }
       setRole(r);
       loadMemories();
+      loadStatus();
+      loadSong();
+      // Push bildirim kaydı
+      registerPush(r);
     })();
   }, []);
+
+  const loadStatus = async () => {
+    try {
+      const res  = await fetch(`${API_BASE}/api/status`);
+      const data = await res.json();
+      setStatus({ emoji: data.emoji || '🐰', text: data.text || '' });
+    } catch (e) {}
+  };
+
+  const loadSong = async () => {
+    try {
+      const res  = await fetch(`${API_BASE}/api/song`);
+      const data = await res.json();
+      setSong({ url: data.url || '', title: data.title || '' });
+    } catch (e) {}
+  };
+
+  const handleSaveStatus = async () => {
+    try {
+      await fetch(`${API_BASE}/api/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emoji: newEmoji || status.emoji, text: newText, role }),
+      });
+      setStatus({ emoji: newEmoji || status.emoji, text: newText });
+      setShowStatusModal(false);
+    } catch (e) {}
+  };
+
+  const handleSaveSong = async () => {
+    if (!newSongUrl.trim()) return;
+    try {
+      await fetch(`${API_BASE}/api/song`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: newSongUrl, title: newSongTitle, role }),
+      });
+      setSong({ url: newSongUrl, title: newSongTitle });
+      setShowSongModal(false);
+    } catch (e) {}
+  };
 
   const loadMemories = useCallback(async () => {
     setRefresh(true);
@@ -195,9 +247,71 @@ export default function GalleryScreen() {
     <MemoryCard item={item} onPress={() => setSelected(item)} />
   );
 
+  const STATUS_EMOJIS = ['🐰', '😍', '🥰', '💕', '😴', '🎵', '🌸', '✨', '💔', '🤍'];
+
   return (
     <View style={gs.container}>
       <StatusBar barStyle="light-content" />
+
+      {/* Mod Seçici Modal */}
+      <Modal visible={showStatusModal} transparent animationType="slide" onRequestClose={() => setShowStatusModal(false)}>
+        <View style={md.overlay}>
+          <View style={md.card}>
+            <Text style={md.title}>Modunu Güncelle</Text>
+            <View style={md.emojiRow}>
+              {STATUS_EMOJIS.map(e => (
+                <TouchableOpacity key={e} onPress={() => setNewEmoji(e)} style={[md.emojiBtn, newEmoji === e && md.emojiBtnActive]}>
+                  <Text style={md.emojiText}>{e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={md.input}
+              placeholder="Kısa mesaj (opsiyonel)"
+              placeholderTextColor="#ffb3c1"
+              value={newText}
+              onChangeText={setNewText}
+            />
+            <TouchableOpacity style={md.saveBtn} onPress={handleSaveStatus}>
+              <Text style={md.saveBtnText}>Kaydet ✨</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowStatusModal(false)}>
+              <Text style={md.cancelText}>İptal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Günün Şarkısı Modal */}
+      <Modal visible={showSongModal} transparent animationType="slide" onRequestClose={() => setShowSongModal(false)}>
+        <View style={md.overlay}>
+          <View style={md.card}>
+            <Text style={md.title}>🎵 Günün Şarkısı</Text>
+            <TextInput
+              style={md.input}
+              placeholder="Spotify veya YouTube linki"
+              placeholderTextColor="#ffb3c1"
+              value={newSongUrl}
+              onChangeText={setNewSongUrl}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={md.input}
+              placeholder="Şarkı adı (opsiyonel)"
+              placeholderTextColor="#ffb3c1"
+              value={newSongTitle}
+              onChangeText={setNewSongTitle}
+            />
+            <TouchableOpacity style={md.saveBtn} onPress={handleSaveSong}>
+              <Text style={md.saveBtnText}>Paylaş 🎵</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowSongModal(false)}>
+              <Text style={md.cancelText}>İptal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <FlatList
         data={memories}
         keyExtractor={m => m.id}
@@ -206,7 +320,34 @@ export default function GalleryScreen() {
         columnWrapperStyle={gs.row}
         contentContainerStyle={gs.list}
         ListHeaderComponent={
-          <LoveHeader role={role} onLogout={handleLogout} onManage={handleManage} />
+          <>
+            <LoveHeader role={role} onLogout={handleLogout} onManage={handleManage} />
+            {/* Mod Widget */}
+            <TouchableOpacity style={sw.statusCard} onPress={() => { setNewEmoji(status.emoji); setNewText(status.text); setShowStatusModal(true); }} activeOpacity={0.8}>
+              <Text style={sw.statusEmoji}>{status.emoji}</Text>
+              <View style={sw.statusInfo}>
+                <Text style={sw.statusLabel}>Şu anki mod</Text>
+                {!!status.text && <Text style={sw.statusText}>{status.text}</Text>}
+              </View>
+              <Text style={sw.statusEdit}>✏️</Text>
+            </TouchableOpacity>
+            {/* Günün Şarkısı Widget */}
+            <View style={sw.songCard}>
+              <View style={sw.songInfo}>
+                <Text style={sw.songLabel}>🎵 Günün Şarkısı</Text>
+                {song.url ? (
+                  <TouchableOpacity onPress={() => Linking.openURL(song.url)}>
+                    <Text style={sw.songTitle} numberOfLines={1}>{song.title || song.url}</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={sw.songEmpty}>Henüz şarkı seçilmedi</Text>
+                )}
+              </View>
+              <TouchableOpacity style={sw.songBtn} onPress={() => { setNewSongUrl(song.url); setNewSongTitle(song.title); setShowSongModal(true); }}>
+                <Text style={sw.songBtnText}>Seç</Text>
+              </TouchableOpacity>
+            </View>
+          </>
         }
         ListEmptyComponent={
           <View style={gs.empty}>
@@ -258,6 +399,36 @@ const gs = StyleSheet.create({
   empty:     { alignItems: 'center', paddingTop: 48, paddingHorizontal: 24 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
   emptyText: { fontSize: 15, color: '#ff8fa3', textAlign: 'center', lineHeight: 24, fontStyle: 'italic' },
+});
+
+const sw = StyleSheet.create({
+  statusCard:  { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', marginHorizontal: 12, marginTop: 10, borderRadius: 16, padding: 14, shadowColor: '#ff8fa3', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
+  statusEmoji: { fontSize: 32, marginRight: 12 },
+  statusInfo:  { flex: 1 },
+  statusLabel: { fontSize: 11, color: '#ffb3c1', textTransform: 'uppercase', letterSpacing: 0.5 },
+  statusText:  { fontSize: 14, color: '#c9184a', fontWeight: '600', marginTop: 2 },
+  statusEdit:  { fontSize: 16 },
+  songCard:    { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff0f3', marginHorizontal: 12, marginTop: 8, marginBottom: 4, borderRadius: 16, padding: 14 },
+  songInfo:    { flex: 1 },
+  songLabel:   { fontSize: 11, color: '#ff8fa3', textTransform: 'uppercase', letterSpacing: 0.5 },
+  songTitle:   { fontSize: 14, color: '#c9184a', fontWeight: '600', marginTop: 2, textDecorationLine: 'underline' },
+  songEmpty:   { fontSize: 13, color: '#ffb3c1', fontStyle: 'italic', marginTop: 2 },
+  songBtn:     { backgroundColor: '#ff8fa3', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  songBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+});
+
+const md = StyleSheet.create({
+  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  card:         { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  title:        { fontSize: 18, fontWeight: '800', color: '#c9184a', marginBottom: 16, textAlign: 'center' },
+  emojiRow:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginBottom: 16 },
+  emojiBtn:     { width: 48, height: 48, borderRadius: 12, backgroundColor: '#fff0f3', justifyContent: 'center', alignItems: 'center' },
+  emojiBtnActive: { backgroundColor: '#ffb3c1', borderWidth: 2, borderColor: '#ff6b8a' },
+  emojiText:    { fontSize: 24 },
+  input:        { borderWidth: 1.5, borderColor: '#ffd6e0', borderRadius: 12, padding: 12, fontSize: 14, color: '#c9184a', marginBottom: 12, backgroundColor: '#fff8f9' },
+  saveBtn:      { backgroundColor: '#ff6b8a', borderRadius: 14, padding: 15, alignItems: 'center', marginBottom: 12 },
+  saveBtnText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
+  cancelText:   { color: '#ff8fa3', textAlign: 'center', fontSize: 14 },
 });
 
 const vw = StyleSheet.create({
