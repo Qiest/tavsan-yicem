@@ -1,6 +1,14 @@
 {
   "routes": [
     {
+      "src": "/sw.js",
+      "dest": "/sw.js",
+      "headers": {
+        "Service-Worker-Allowed": "/",
+        "Cache-Control": "no-cache"
+      }
+    },
+    {
       "src": "/assets/(.*)",
       "dest": "/assets/$1"
     },

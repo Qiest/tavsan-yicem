@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Dimensions, RefreshControl, Modal, Image, Platform,
-  StatusBar, Animated,
+  StatusBar, Animated, TextInput, Linking,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { useRouter } from 'expo-router';
@@ -10,11 +10,12 @@ import { storage } from './_layout';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLoveCounter } from '../hooks/useLoveCounter';
 import { API_BASE, mediaUrl } from '../config/api';
+import { registerPush } from '../hooks/usePush';
 
 const { width } = Dimensions.get('window');
-const CARD_GAP   = 10;
-const NUM_COLS   = 2;
-const CARD_SIZE  = (width - 24 - CARD_GAP) / NUM_COLS;
+const CARD_GAP  = 10;
+const NUM_COLS  = 2;
+const CARD_SIZE = (width - 24 - CARD_GAP) / NUM_COLS;
 
 interface Memory {
   id:       string;
@@ -34,7 +35,15 @@ function CounterUnit({ value, label }: { value: number; label: string }) {
   );
 }
 
-function LoveHeader({ role, onLogout, onManage }: { role: string; onLogout: () => void; onManage: () => void }) {
+function LoveHeader({
+  role, onLogout, onManage, onEnableNotif, notifEnabled,
+}: {
+  role: string;
+  onLogout: () => void;
+  onManage: () => void;
+  onEnableNotif: () => void;
+  notifEnabled: boolean;
+}) {
   const { days, hours, minutes, seconds } = useLoveCounter();
   const fadeIn = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -64,6 +73,12 @@ function LoveHeader({ role, onLogout, onManage }: { role: string; onLogout: () =
               <Text style={cs.chipText}>✦ Manage</Text>
             </TouchableOpacity>
           )}
+          {/* BİLDİRİM BUTONU — Safari için mutlaka buton tıklaması lazım */}
+          {!notifEnabled && (
+            <TouchableOpacity style={[cs.chip, cs.chipNotif]} onPress={onEnableNotif}>
+              <Text style={cs.chipText}>🔔 Bildirimleri Aç</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[cs.chip, cs.chipGhost]} onPress={onLogout}>
             <Text style={[cs.chipText, { color: '#c9184a' }]}>Log out</Text>
           </TouchableOpacity>
@@ -80,7 +95,9 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
   const onPressIn  = () => Animated.spring(scale, { toValue: 0.96, useNativeDriver: true }).start();
   const onPressOut = () => Animated.spring(scale, { toValue: 1,    useNativeDriver: true }).start();
 
-  const dateLabel = item.date ? new Date(item.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const dateLabel = item.date
+    ? new Date(item.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
 
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -91,11 +108,7 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
         onPressOut={onPressOut}
         activeOpacity={1}
       >
-        <Image
-          source={{ uri: mediaUrl(item.fileId) }}
-          style={ms.thumb}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: mediaUrl(item.fileId) }} style={ms.thumb} resizeMode="cover" />
         {item.fileType === 'video' && (
           <View style={ms.playBadge}><Text style={ms.playIcon}>▶</Text></View>
         )}
@@ -153,18 +166,20 @@ function MediaViewer({ memory, onClose }: { memory: Memory | null; onClose: () =
 // ── Gallery Screen ────────────────────────────────────────────────────────────
 export default function GalleryScreen() {
   const router = useRouter();
-  const [role,      setRole]     = useState('user');
-  const [memories,  setMemories] = useState<Memory[]>([]);
-  const [refreshing, setRefresh] = useState(false);
-  const [selected,   setSelected] = useState<Memory | null>(null);
-  const [status,     setStatus]   = useState({ emoji: '🐰', text: '' });
-  const [song,       setSong]     = useState({ url: '', title: '' });
+  const [role,           setRole]          = useState('user');
+  const [memories,       setMemories]      = useState<Memory[]>([]);
+  const [refreshing,     setRefresh]       = useState(false);
+  const [selected,       setSelected]      = useState<Memory | null>(null);
+  const [status,         setStatus]        = useState({ emoji: '🐰', text: '' });
+  const [song,           setSong]          = useState({ url: '', title: '' });
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showSongModal,   setShowSongModal]   = useState(false);
-  const [newEmoji,   setNewEmoji]   = useState('');
-  const [newText,    setNewText]    = useState('');
-  const [newSongUrl,  setNewSongUrl]  = useState('');
-  const [newSongTitle, setNewSongTitle] = useState('');
+  const [newEmoji,        setNewEmoji]     = useState('');
+  const [newText,         setNewText]      = useState('');
+  const [newSongUrl,      setNewSongUrl]   = useState('');
+  const [newSongTitle,    setNewSongTitle] = useState('');
+  // Bildirim izni verildi mi?
+  const [notifEnabled,    setNotifEnabled] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -177,10 +192,20 @@ export default function GalleryScreen() {
       loadMemories();
       loadStatus();
       loadSong();
-      // Push bildirim kaydı
-      registerPush(r);
+
+      // Bildirim zaten verilmişse butonu gizle
+      if (Platform.OS === 'web' && 'Notification' in window) {
+        setNotifEnabled(Notification.permission === 'granted');
+      }
     })();
   }, []);
+
+  // Kullanıcı "Bildirimleri Aç" butonuna tıkladığında çağrılır
+  // Safari bu yüzden buton tıklamasına ihtiyaç duyar
+  const handleEnableNotif = async () => {
+    const success = await registerPush(role);
+    if (success) setNotifEnabled(true);
+  };
 
   const loadStatus = async () => {
     try {
@@ -201,9 +226,9 @@ export default function GalleryScreen() {
   const handleSaveStatus = async () => {
     try {
       await fetch(`${API_BASE}/api/status`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emoji: newEmoji || status.emoji, text: newText, role }),
+        body:    JSON.stringify({ emoji: newEmoji || status.emoji, text: newText, role }),
       });
       setStatus({ emoji: newEmoji || status.emoji, text: newText });
       setShowStatusModal(false);
@@ -214,9 +239,9 @@ export default function GalleryScreen() {
     if (!newSongUrl.trim()) return;
     try {
       await fetch(`${API_BASE}/api/song`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: newSongUrl, title: newSongTitle, role }),
+        body:    JSON.stringify({ url: newSongUrl, title: newSongTitle, role }),
       });
       setSong({ url: newSongUrl, title: newSongTitle });
       setShowSongModal(false);
@@ -321,9 +346,19 @@ export default function GalleryScreen() {
         contentContainerStyle={gs.list}
         ListHeaderComponent={
           <>
-            <LoveHeader role={role} onLogout={handleLogout} onManage={handleManage} />
+            <LoveHeader
+              role={role}
+              onLogout={handleLogout}
+              onManage={handleManage}
+              onEnableNotif={handleEnableNotif}
+              notifEnabled={notifEnabled}
+            />
             {/* Mod Widget */}
-            <TouchableOpacity style={sw.statusCard} onPress={() => { setNewEmoji(status.emoji); setNewText(status.text); setShowStatusModal(true); }} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={sw.statusCard}
+              onPress={() => { setNewEmoji(status.emoji); setNewText(status.text); setShowStatusModal(true); }}
+              activeOpacity={0.8}
+            >
               <Text style={sw.statusEmoji}>{status.emoji}</Text>
               <View style={sw.statusInfo}>
                 <Text style={sw.statusLabel}>Şu anki mod</Text>
@@ -343,7 +378,10 @@ export default function GalleryScreen() {
                   <Text style={sw.songEmpty}>Henüz şarkı seçilmedi</Text>
                 )}
               </View>
-              <TouchableOpacity style={sw.songBtn} onPress={() => { setNewSongUrl(song.url); setNewSongTitle(song.title); setShowSongModal(true); }}>
+              <TouchableOpacity
+                style={sw.songBtn}
+                onPress={() => { setNewSongUrl(song.url); setNewSongTitle(song.title); setShowSongModal(true); }}
+              >
                 <Text style={sw.songBtnText}>Seç</Text>
               </TouchableOpacity>
             </View>
@@ -376,9 +414,10 @@ const cs = StyleSheet.create({
   label:       { fontSize: 10, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
   sep:         { fontSize: 22, fontWeight: '800', color: 'rgba(255,255,255,0.6)', marginTop: -4 },
   headerSub:   { fontSize: 12, color: 'rgba(255,255,255,0.9)', marginTop: 8, fontStyle: 'italic' },
-  headerActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  headerActions:  { flexDirection: 'row', gap: 10, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' },
   chip:        { backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   chipGhost:   { backgroundColor: 'rgba(255,255,255,0.5)' },
+  chipNotif:   { backgroundColor: 'rgba(255,255,255,0.95)' },
   chipText:    { fontSize: 13, fontWeight: '600', color: '#c9184a' },
 });
 
@@ -418,17 +457,17 @@ const sw = StyleSheet.create({
 });
 
 const md = StyleSheet.create({
-  overlay:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  card:         { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
-  title:        { fontSize: 18, fontWeight: '800', color: '#c9184a', marginBottom: 16, textAlign: 'center' },
-  emojiRow:     { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginBottom: 16 },
-  emojiBtn:     { width: 48, height: 48, borderRadius: 12, backgroundColor: '#fff0f3', justifyContent: 'center', alignItems: 'center' },
+  overlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  card:           { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
+  title:          { fontSize: 18, fontWeight: '800', color: '#c9184a', marginBottom: 16, textAlign: 'center' },
+  emojiRow:       { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginBottom: 16 },
+  emojiBtn:       { width: 48, height: 48, borderRadius: 12, backgroundColor: '#fff0f3', justifyContent: 'center', alignItems: 'center' },
   emojiBtnActive: { backgroundColor: '#ffb3c1', borderWidth: 2, borderColor: '#ff6b8a' },
-  emojiText:    { fontSize: 24 },
-  input:        { borderWidth: 1.5, borderColor: '#ffd6e0', borderRadius: 12, padding: 12, fontSize: 14, color: '#c9184a', marginBottom: 12, backgroundColor: '#fff8f9' },
-  saveBtn:      { backgroundColor: '#ff6b8a', borderRadius: 14, padding: 15, alignItems: 'center', marginBottom: 12 },
-  saveBtnText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
-  cancelText:   { color: '#ff8fa3', textAlign: 'center', fontSize: 14 },
+  emojiText:      { fontSize: 24 },
+  input:          { borderWidth: 1.5, borderColor: '#ffd6e0', borderRadius: 12, padding: 12, fontSize: 14, color: '#c9184a', marginBottom: 12, backgroundColor: '#fff8f9' },
+  saveBtn:        { backgroundColor: '#ff6b8a', borderRadius: 14, padding: 15, alignItems: 'center', marginBottom: 12 },
+  saveBtnText:    { color: '#fff', fontWeight: '700', fontSize: 15 },
+  cancelText:     { color: '#ff8fa3', textAlign: 'center', fontSize: 14 },
 });
 
 const vw = StyleSheet.create({
