@@ -1,0 +1,16 @@
+{
+  "name": "Tavşan",
+  "short_name": "Tavşan",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFC0CB",
+  "theme_color": "#ff6b8a",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
