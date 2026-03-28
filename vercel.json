@@ -9,6 +9,14 @@
       }
     },
     {
+      "src": "/icon.png",
+      "dest": "/icon.png"
+    },
+    {
+      "src": "/manifest.json",
+      "dest": "/manifest.json"
+    },
+    {
       "src": "/assets/(.*)",
       "dest": "/assets/$1"
     },
