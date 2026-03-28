@@ -101,17 +101,19 @@ export default function ManageScreen() {
     }
   };
 
-  const handleDelete = (id: string) => {
-    Alert.alert('Delete memory?', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          await fetch(`${API_BASE}/api/memories/${id}`, { method: 'DELETE' });
-          loadMemories();
-        },
-      },
-    ]);
+  const handleDelete = async (id: string) => {
+    // Web'de Alert çalışmıyor, confirm kullan
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('Delete this memory? This cannot be undone.')
+      : await new Promise<boolean>(resolve =>
+          Alert.alert('Delete memory?', 'This cannot be undone.', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+          ])
+        );
+    if (!confirmed) return;
+    await fetch(`${API_BASE}/api/memories/${id}`, { method: 'DELETE' });
+    loadMemories();
   };
 
   const handleLogout = async () => {
@@ -201,9 +203,18 @@ export default function ManageScreen() {
                 <Text style={styles.memDate}>{m.date ? new Date(m.date).toLocaleDateString('tr-TR') : ''}</Text>
                 <Text style={styles.memType}>{m.fileType}</Text>
               </View>
-              <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(m.id)}>
-                <Text style={styles.deleteText}>🗑</Text>
-              </TouchableOpacity>
+              {Platform.OS === 'web' ? (
+                <button
+                  onClick={() => handleDelete(m.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, padding: 8 }}
+                >
+                  🗑
+                </button>
+              ) : (
+                <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(m.id)}>
+                  <Text style={styles.deleteText}>🗑</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
         </ScrollView>
