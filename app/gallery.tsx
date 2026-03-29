@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Dimensions, RefreshControl, Modal, Image, Platform,
-  StatusBar, Animated, TextInput, Linking,
+  StatusBar, Animated, TextInput, Linking, ScrollView,
 } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import { useRouter } from 'expo-router';
@@ -11,6 +11,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLoveCounter } from '../hooks/useLoveCounter';
 import { API_BASE, mediaUrl } from '../config/api';
 import { registerPush } from '../hooks/usePush';
+import * as ImagePicker from 'expo-image-picker';
+
+// Spotify/YouTube linkinden embed URL üret
+function getEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  // Spotify track
+  const spotifyMatch = url.match(/spotify\.com\/track\/([a-zA-Z0-9]+)/);
+  if (spotifyMatch) return `https://open.spotify.com/embed/track/${spotifyMatch[1]}`;
+  // YouTube
+  const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+  if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+  return null;
+}
 
 const { width } = Dimensions.get('window');
 const CARD_GAP  = 10;
@@ -23,6 +36,13 @@ interface Memory {
   date:     string;
   fileId:   string;
   fileType: string;
+}
+
+interface Comment {
+  id:        string;
+  text:      string;
+  role:      string;
+  createdAt: string;
 }
 
 // ── Counter Widget ────────────────────────────────────────────────────────────
@@ -123,7 +143,38 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
 }
 
 // ── Full-screen Viewer ────────────────────────────────────────────────────────
-function MediaViewer({ memory, onClose }: { memory: Memory | null; onClose: () => void }) {
+function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: string; onClose: () => void }) {
+  const [comments,    setComments]    = useState<Comment[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [sending,     setSending]     = useState(false);
+
+  useEffect(() => {
+    if (memory) loadComments();
+  }, [memory]);
+
+  const loadComments = async () => {
+    if (!memory) return;
+    try {
+      const res  = await fetch(`${API_BASE}/api/memories/${memory.id}/comments`);
+      const data = await res.json();
+      setComments(Array.isArray(data) ? data : []);
+    } catch (e) {}
+  };
+
+  const handleSendComment = async () => {
+    if (!commentText.trim() || !memory) return;
+    setSending(true);
+    try {
+      await fetch(`${API_BASE}/api/memories/${memory.id}/comments`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text: commentText, role }),
+      });
+      setCommentText('');
+      loadComments();
+    } catch (e) {} finally { setSending(false); }
+  };
+
   if (!memory) return null;
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -158,6 +209,51 @@ function MediaViewer({ memory, onClose }: { memory: Memory | null; onClose: () =
             )}
           </View>
         )}
+
+        {/* Yorumlar */}
+        <View style={vw.commentSection}>
+          <ScrollView style={vw.commentList} keyboardShouldPersistTaps="handled">
+            {comments.map(c => (
+              <View key={c.id} style={[vw.commentBubble, c.role === role && vw.commentBubbleSelf]}>
+                <Text style={vw.commentRole}>{c.role === 'admin' ? '🦊' : '🐰'}</Text>
+                <Text style={vw.commentText}>{c.text}</Text>
+                {role === 'admin' && (
+                  Platform.OS === 'web' ? (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm('Yorumu sil?')) return;
+                        await fetch(`${API_BASE}/api/memories/${memory.id}/comments/${c.id}`, { method: 'DELETE' });
+                        loadComments();
+                      }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'rgba(255,255,255,0.4)', padding: 4 }}
+                    >✕</button>
+                  ) : (
+                    <TouchableOpacity onPress={async () => {
+                      await fetch(`${API_BASE}/api/memories/${memory.id}/comments/${c.id}`, { method: 'DELETE' });
+                      loadComments();
+                    }}>
+                      <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>✕</Text>
+                    </TouchableOpacity>
+                  )
+                )}
+              </View>
+            ))}
+          </ScrollView>
+          <View style={vw.commentInput}>
+            <TextInput
+              style={vw.commentInputText}
+              placeholder="Yorum yaz..."
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              value={commentText}
+              onChangeText={setCommentText}
+              onSubmitEditing={handleSendComment}
+              returnKeyType="send"
+            />
+            <TouchableOpacity onPress={handleSendComment} disabled={sending} style={vw.commentSendBtn}>
+              <Text style={vw.commentSendText}>{sending ? '...' : '↑'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     </Modal>
   );
@@ -180,6 +276,10 @@ export default function GalleryScreen() {
   const [newSongTitle,    setNewSongTitle] = useState('');
   // Bildirim izni verildi mi?
   const [notifEnabled,    setNotifEnabled] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile,      setUploadFile]   = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [uploadCaption,   setUploadCaption] = useState('');
+  const [uploading,       setUploading]    = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -248,6 +348,40 @@ export default function GalleryScreen() {
     } catch (e) {}
   };
 
+  const handlePickUpload = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+    });
+    if (!result.canceled && result.assets.length > 0) {
+      setUploadFile(result.assets[0]);
+    }
+  };
+
+  const handleUserUpload = async () => {
+    if (!uploadFile) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      const ext  = uploadFile.uri.split('.').pop() || 'jpg';
+      const mime = `image/${ext}`;
+      if (Platform.OS === 'web') {
+        const response = await fetch(uploadFile.uri);
+        const blob = await response.blob();
+        form.append('file', new Blob([blob], { type: mime }), `upload.${ext}`);
+      } else {
+        // @ts-ignore
+        form.append('file', { uri: uploadFile.uri, name: `upload.${ext}`, type: mime });
+      }
+      form.append('caption', uploadCaption);
+      await fetch(`${API_BASE}/api/user/memories`, { method: 'POST', body: form });
+      setUploadFile(null);
+      setUploadCaption('');
+      setShowUploadModal(false);
+      loadMemories();
+    } catch (e) {} finally { setUploading(false); }
+  };
+
   const loadMemories = useCallback(async () => {
     setRefresh(true);
     try {
@@ -271,6 +405,8 @@ export default function GalleryScreen() {
   const renderItem = ({ item }: { item: Memory }) => (
     <MemoryCard item={item} onPress={() => setSelected(item)} />
   );
+
+  const embedUrl = song.url ? getEmbedUrl(song.url) : null;
 
   const STATUS_EMOJIS = ['😭', '😍', '🥰', '💕', '😴', '🥱', '🌸', '✨', '💔', '🧡'];
 
@@ -337,6 +473,35 @@ export default function GalleryScreen() {
         </View>
       </Modal>
 
+      {/* Esma Upload Modal */}
+      <Modal visible={showUploadModal} transparent animationType="slide" onRequestClose={() => setShowUploadModal(false)}>
+        <View style={md.overlay}>
+          <View style={md.card}>
+            <Text style={md.title}>📸 Anı Ekle</Text>
+            <TouchableOpacity style={sw.uploadPicker} onPress={handlePickUpload}>
+              {uploadFile ? (
+                <Image source={{ uri: uploadFile.uri }} style={{ width: '100%', height: 160, borderRadius: 12 }} resizeMode="cover" />
+              ) : (
+                <Text style={{ color: '#ffb3c1', fontSize: 14 }}>Fotoğraf seç</Text>
+              )}
+            </TouchableOpacity>
+            <TextInput
+              style={md.input}
+              placeholder="Açıklama (opsiyonel)"
+              placeholderTextColor="#ffb3c1"
+              value={uploadCaption}
+              onChangeText={setUploadCaption}
+            />
+            <TouchableOpacity style={[md.saveBtn, uploading && { opacity: 0.6 }]} onPress={handleUserUpload} disabled={uploading}>
+              <Text style={md.saveBtnText}>{uploading ? 'Yükleniyor...' : 'Yükle ✨'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowUploadModal(false)}>
+              <Text style={md.cancelText}>İptal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <FlatList
         data={memories}
         keyExtractor={m => m.id}
@@ -385,6 +550,26 @@ export default function GalleryScreen() {
                 <Text style={sw.songBtnText}>Seç</Text>
               </TouchableOpacity>
             </View>
+            {/* Embed Player - sadece web'de ve link varsa */}
+            {embedUrl && Platform.OS === 'web' && (
+              <View style={sw.embedCard}>
+                <iframe
+                  src={embedUrl}
+                  width="100%"
+                  height={embedUrl.includes('spotify') ? '80' : '120'}
+                  frameBorder="0"
+                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  style={{ borderRadius: 12, display: 'block' }}
+                />
+              </View>
+            )}
+            {/* Esma'nın Fotoğraf Yükleme Butonu */}
+            {role === 'user' && (
+              <TouchableOpacity style={sw.uploadCard} onPress={() => setShowUploadModal(true)}>
+                <Text style={sw.uploadIcon}>📸</Text>
+                <Text style={sw.uploadText}>Anı Ekle</Text>
+              </TouchableOpacity>
+            )}
           </>
         }
         ListEmptyComponent={
@@ -398,7 +583,7 @@ export default function GalleryScreen() {
         }
         showsVerticalScrollIndicator={false}
       />
-      <MediaViewer memory={selected} onClose={() => setSelected(null)} />
+      <MediaViewer memory={selected} role={role} onClose={() => setSelected(null)} />
     </View>
   );
 }
@@ -454,6 +639,12 @@ const sw = StyleSheet.create({
   songEmpty:   { fontSize: 13, color: '#ffb3c1', fontStyle: 'italic', marginTop: 2 },
   songBtn:     { backgroundColor: '#ff8fa3', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
   songBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  songOpen:    { fontSize: 13, color: '#ff6b8a', fontWeight: '600', marginTop: 4 },
+  uploadCard:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ff6b8a', marginHorizontal: 12, marginTop: 8, marginBottom: 4, borderRadius: 16, padding: 14, gap: 8 },
+  uploadIcon:  { fontSize: 20 },
+  uploadText:  { color: '#fff', fontWeight: '700', fontSize: 15 },
+  uploadPicker: { backgroundColor: '#fff0f3', borderRadius: 12, height: 160, justifyContent: 'center', alignItems: 'center', marginBottom: 12, borderWidth: 1.5, borderColor: '#ffd6e0', borderStyle: 'dashed' as any },
+  embedCard:   { marginHorizontal: 12, marginTop: 0, marginBottom: 8, borderRadius: 12, overflow: 'hidden' as any },
 });
 
 const md = StyleSheet.create({
@@ -471,11 +662,21 @@ const md = StyleSheet.create({
 });
 
 const vw = StyleSheet.create({
-  container:   { flex: 1, backgroundColor: '#0a0005', justifyContent: 'center' },
-  close:       { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 32, right: 20, zIndex: 10, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  closeText:   { color: '#fff', fontSize: 18, fontWeight: '600' },
-  image:       { width: '100%', height: '75%' },
-  captionBox:  { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(201,24,74,0.85)', padding: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 20 },
-  captionText: { color: '#fff', fontSize: 16, fontWeight: '600', textAlign: 'center' },
-  dateText:    { color: 'rgba(255,255,255,0.8)', fontSize: 12, textAlign: 'center', marginTop: 4 },
+  container:      { flex: 1, backgroundColor: '#0a0005' },
+  close:          { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 32, right: 20, zIndex: 10, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  closeText:      { color: '#fff', fontSize: 18, fontWeight: '600' },
+  image:          { width: '100%', height: '55%', marginTop: 60 },
+  captionBox:     { backgroundColor: 'rgba(201,24,74,0.85)', padding: 12, paddingHorizontal: 20 },
+  captionText:    { color: '#fff', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  dateText:       { color: 'rgba(255,255,255,0.8)', fontSize: 11, textAlign: 'center', marginTop: 2 },
+  commentSection: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  commentList:    { flex: 1 },
+  commentBubble:  { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12, padding: 10 },
+  commentBubbleSelf: { backgroundColor: 'rgba(201,24,74,0.2)' },
+  commentRole:    { fontSize: 16 },
+  commentText:    { color: '#fff', fontSize: 13, flex: 1, lineHeight: 18 },
+  commentInput:   { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 30 : 10, gap: 8 },
+  commentInputText: { flex: 1, color: '#fff', fontSize: 14, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
+  commentSendBtn: { backgroundColor: '#ff6b8a', borderRadius: 20, width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
+  commentSendText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

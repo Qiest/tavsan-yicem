@@ -91,7 +91,6 @@ export default function ManageScreen() {
   };
 
   const handleUpload = async () => {
-    if (Platform.OS === 'web') { window.alert('Platform: web'); } else { Alert.alert('Platform: ' + Platform.OS); }
     if (!file) { Alert.alert('Please select a file first!'); return; }
     setUploading(true);
     try {
