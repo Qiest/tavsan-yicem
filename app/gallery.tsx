@@ -32,6 +32,7 @@ interface Memory {
   caption:  string;
   date:     string;
   fileId:   string;
+  mediaUrl: string;
   fileType: string;
 }
 
@@ -106,7 +107,7 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
       <TouchableOpacity style={ms.card} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} activeOpacity={1}>
-        <Image source={{ uri: mediaUrl(item.fileId) }} style={ms.thumb} resizeMode="cover" />
+        <Image source={{ uri: item.mediaUrl || mediaUrl(item.fileId) }} style={ms.thumb} resizeMode="cover" />
         {item.fileType === 'video' && (
           <View style={ms.playBadge}><Text style={ms.playIcon}>▶</Text></View>
         )}
@@ -119,9 +120,10 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
 }
 
 function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: string; onClose: () => void }) {
-  const [comments,    setComments]    = useState<Comment[]>([]);
-  const [commentText, setCommentText] = useState('');
-  const [sending,     setSending]     = useState(false);
+  const [comments,     setComments]    = useState<Comment[]>([]);
+  const [commentText,  setCommentText] = useState('');
+  const [sending,      setSending]     = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   useEffect(() => { if (memory) loadComments(); }, [memory]);
 
@@ -151,17 +153,34 @@ function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: s
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={vw.container}>
+        {/* Fotoğraf tam ekran */}
+        {memory.fileType === 'video' ? (
+          <Video source={{ uri: memory.mediaUrl || mediaUrl(memory.fileId) }} style={vw.image} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay />
+        ) : (
+          <Image source={{ uri: memory.mediaUrl || mediaUrl(memory.fileId) }} style={vw.image} resizeMode="contain" />
+        )}
+
+        {/* Kapat butonu */}
         <TouchableOpacity style={vw.close} onPress={onClose}>
           <Text style={vw.closeText}>✕</Text>
         </TouchableOpacity>
-        {memory.fileType === 'video' ? (
-          <Video source={{ uri: mediaUrl(memory.fileId) }} style={vw.image} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay />
-        ) : (
-          <Image source={{ uri: mediaUrl(memory.fileId) }} style={vw.image} resizeMode="contain" />
-        )}
-        {!!memory.caption && (
-          <View style={vw.captionBox}>
-            <Text style={vw.captionText}>{memory.caption}</Text>
+
+        {/* Sağ taraf ikonlar */}
+        <View style={vw.sideBar}>
+          <TouchableOpacity style={vw.sideBtn} onPress={() => setShowComments(true)}>
+            <Text style={vw.sideBtnIcon}>💬</Text>
+            {comments.length > 0 && (
+              <View style={vw.badge}>
+                <Text style={vw.badgeText}>{comments.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Alt bilgi: caption + tarih */}
+        {(!!memory.caption || !!memory.date) && (
+          <View style={vw.infoBar}>
+            {!!memory.caption && <Text style={vw.captionText}>{memory.caption}</Text>}
             {!!memory.date && (
               <Text style={vw.dateText}>
                 {new Date(memory.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
@@ -169,46 +188,60 @@ function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: s
             )}
           </View>
         )}
-        <View style={vw.commentSection}>
-          <ScrollView style={vw.commentList} keyboardShouldPersistTaps="handled">
-            {comments.map(c => (
-              <View key={c.id} style={[vw.commentBubble, c.role === role && vw.commentBubbleSelf]}>
-                <Text style={vw.commentRole}>{c.role === 'admin' ? '🦊' : '🐰'}</Text>
-                <Text style={vw.commentText}>{c.text}</Text>
-                {role === 'admin' && (
-                  Platform.OS === 'web' ? (
-                    <button onClick={async () => {
-                      if (!window.confirm('Yorumu sil?')) return;
-                      await fetch(`${API_BASE}/api/memories/${memory.id}/comments/${c.id}`, { method: 'DELETE' });
-                      loadComments();
-                    }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'rgba(255,255,255,0.4)', padding: 4 }}>✕</button>
-                  ) : (
-                    <TouchableOpacity onPress={async () => {
-                      await fetch(`${API_BASE}/api/memories/${memory.id}/comments/${c.id}`, { method: 'DELETE' });
-                      loadComments();
-                    }}>
-                      <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>✕</Text>
-                    </TouchableOpacity>
-                  )
-                )}
-              </View>
-            ))}
-          </ScrollView>
-          <View style={vw.commentInput}>
-            <TextInput
-              style={vw.commentInputText}
-              placeholder="Yorum yaz..."
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              value={commentText}
-              onChangeText={setCommentText}
-              onSubmitEditing={handleSendComment}
-              returnKeyType="send"
-            />
-            <TouchableOpacity onPress={handleSendComment} disabled={sending} style={vw.commentSendBtn}>
-              <Text style={vw.commentSendText}>{sending ? '...' : '↑'}</Text>
-            </TouchableOpacity>
+
+        {/* Yorum Paneli - alttan kayar */}
+        <Modal visible={showComments} transparent animationType="slide" onRequestClose={() => setShowComments(false)}>
+          <TouchableOpacity style={vw.commentOverlay} activeOpacity={1} onPress={() => setShowComments(false)} />
+          <View style={vw.commentPanel}>
+            <View style={vw.commentHandle} />
+            <Text style={vw.commentPanelTitle}>💬 Yorumlar</Text>
+            <ScrollView style={vw.commentList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {comments.length === 0 && (
+                <Text style={vw.commentEmpty}>Henüz yorum yok 🌸</Text>
+              )}
+              {comments.map(c => (
+                <View key={c.id} style={[vw.commentBubble, c.role === role ? vw.commentBubbleSelf : vw.commentBubbleOther]}>
+                  <Text style={vw.commentRole}>{c.role === 'admin' ? '🦊' : '🐰'}</Text>
+                  <View style={vw.commentBody}>
+                    <Text style={vw.commentText}>{c.text}</Text>
+                    <Text style={vw.commentTime}>{c.createdAt}</Text>
+                  </View>
+                  {role === 'admin' && (
+                    Platform.OS === 'web' ? (
+                      <button onClick={async () => {
+                        if (!window.confirm('Yorumu sil?')) return;
+                        await fetch(`${API_BASE}/api/memories/${memory.id}/comments/${c.id}`, { method: 'DELETE' });
+                        loadComments();
+                      }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: '#ffb3c1', padding: 4 }}>✕</button>
+                    ) : (
+                      <TouchableOpacity onPress={async () => {
+                        await fetch(`${API_BASE}/api/memories/${memory.id}/comments/${c.id}`, { method: 'DELETE' });
+                        loadComments();
+                      }}>
+                        <Text style={{ color: '#ffb3c1', fontSize: 12 }}>✕</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+            <View style={vw.commentInput}>
+              <TextInput
+                style={vw.commentInputText}
+                placeholder="Yorum yaz..."
+                placeholderTextColor="#ffb3c1"
+                value={commentText}
+                onChangeText={setCommentText}
+                onSubmitEditing={handleSendComment}
+                returnKeyType="send"
+                autoFocus
+              />
+              <TouchableOpacity onPress={handleSendComment} disabled={sending} style={vw.commentSendBtn}>
+                <Text style={vw.commentSendText}>{sending ? '...' : '↑'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </Modal>
       </View>
     </Modal>
   );
@@ -563,21 +596,33 @@ const md = StyleSheet.create({
 });
 
 const vw = StyleSheet.create({
-  container:         { flex: 1, backgroundColor: '#0a0005' },
-  close:             { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 32, right: 20, zIndex: 10, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  closeText:         { color: '#fff', fontSize: 18, fontWeight: '600' },
-  image:             { width: '100%', height: '55%', marginTop: 60 },
-  captionBox:        { backgroundColor: 'rgba(201,24,74,0.85)', padding: 12, paddingHorizontal: 20 },
-  captionText:       { color: '#fff', fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  dateText:          { color: 'rgba(255,255,255,0.8)', fontSize: 11, textAlign: 'center', marginTop: 2 },
-  commentSection:    { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
-  commentList:       { flex: 1 },
-  commentBubble:     { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12, padding: 10 },
-  commentBubbleSelf: { backgroundColor: 'rgba(201,24,74,0.2)' },
-  commentRole:       { fontSize: 16 },
-  commentText:       { color: '#fff', fontSize: 13, flex: 1, lineHeight: 18 },
-  commentInput:      { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 30 : 10, gap: 8 },
-  commentInputText:  { flex: 1, color: '#fff', fontSize: 14, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8 },
-  commentSendBtn:    { backgroundColor: '#ff6b8a', borderRadius: 20, width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
-  commentSendText:   { color: '#fff', fontSize: 16, fontWeight: '700' },
+  container:          { flex: 1, backgroundColor: '#000' },
+  image:              { width: '100%', height: '100%', position: 'absolute' },
+  close:              { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 32, left: 20, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  closeText:          { color: '#fff', fontSize: 18, fontWeight: '600' },
+  sideBar:            { position: 'absolute', right: 16, bottom: 120, alignItems: 'center', gap: 16 },
+  sideBtn:            { alignItems: 'center' },
+  sideBtnIcon:        { fontSize: 28 },
+  badge:              { position: 'absolute', top: -4, right: -4, backgroundColor: '#ff6b8a', borderRadius: 10, minWidth: 18, height: 18, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 4 },
+  badgeText:          { color: '#fff', fontSize: 10, fontWeight: '700' },
+  infoBar:            { position: 'absolute', bottom: 0, left: 0, right: 60, backgroundColor: 'rgba(0,0,0,0.5)', padding: 16, paddingBottom: Platform.OS === 'ios' ? 36 : 16 },
+  captionText:        { color: '#fff', fontSize: 14, fontWeight: '600' },
+  dateText:           { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 2 },
+  commentOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)' },
+  commentPanel:       { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '70%', paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 36 : 16 },
+  commentHandle:      { width: 40, height: 4, backgroundColor: '#ffd6e0', borderRadius: 2, alignSelf: 'center', marginTop: 12, marginBottom: 8 },
+  commentPanelTitle:  { fontSize: 16, fontWeight: '800', color: '#c9184a', textAlign: 'center', marginBottom: 12 },
+  commentList:        { maxHeight: 300 },
+  commentEmpty:       { color: '#ffb3c1', textAlign: 'center', fontStyle: 'italic', paddingVertical: 24 },
+  commentBubble:      { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 10 },
+  commentBubbleSelf:  { flexDirection: 'row-reverse' },
+  commentBubbleOther: {},
+  commentRole:        { fontSize: 18, marginTop: 2 },
+  commentBody:        { backgroundColor: '#fff0f3', borderRadius: 14, padding: 10, maxWidth: '75%' },
+  commentText:        { color: '#3a0010', fontSize: 13, lineHeight: 18 },
+  commentTime:        { color: '#ffb3c1', fontSize: 10, marginTop: 4 },
+  commentInput:       { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#ffd6e0', paddingTop: 12, gap: 8 },
+  commentInputText:   { flex: 1, color: '#c9184a', fontSize: 14, backgroundColor: '#fff0f3', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderColor: '#ffd6e0' },
+  commentSendBtn:     { backgroundColor: '#ff6b8a', borderRadius: 20, width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  commentSendText:    { color: '#fff', fontSize: 18, fontWeight: '700' },
 });
