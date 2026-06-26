@@ -28,21 +28,91 @@ const NUM_COLS  = 2;
 const CARD_SIZE = (width - 24 - CARD_GAP) / NUM_COLS;
 
 interface Memory {
-  id:       string;
-  caption:  string;
-  date:     string;
-  fileId:   string;
-  mediaUrl: string;
-  fileType: string;
+  id: string; caption: string; date: string; fileId: string; mediaUrl: string; fileType: string;
 }
-
 interface Comment {
-  id:        string;
-  text:      string;
-  role:      string;
-  createdAt: string;
+  id: string; text: string; role: string; createdAt: string;
+}
+interface Gift {
+  id: string; message: string; from_role: string;
 }
 
+// ── Hediye Kutusu Bileşeni ────────────────────────────────────────────────────
+function GiftBox({ gift, role, onOpened }: { gift: Gift; role: string; onOpened: () => void }) {
+  const [opened,      setOpened]      = useState(false);
+  const [showMessage, setShowMessage] = useState(false);
+  const bounceAnim = useRef(new Animated.Value(1)).current;
+  const shakeAnim  = useRef(new Animated.Value(0)).current;
+  const fadeAnim   = useRef(new Animated.Value(0)).current;
+
+  // Giriş animasyonu — kutu zıplar
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounceAnim, { toValue: 1.12, duration: 500, useNativeDriver: true }),
+        Animated.timing(bounceAnim, { toValue: 1,    duration: 500, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const handleOpen = async () => {
+    if (opened) return;
+    // Salla
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10,  duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 8,   duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0,   duration: 60, useNativeDriver: true }),
+    ]).start(async () => {
+      setOpened(true);
+      setShowMessage(true);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+      // Backend'e açıldığını bildir
+      try {
+        await fetch(`${API_BASE}/api/gift/${gift.id}/open`, { method: 'POST' });
+      } catch (e) {}
+    });
+  };
+
+  const handleClose = () => {
+    Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+      setShowMessage(false);
+      onOpened(); // Kutuyu kaldır
+    });
+  };
+
+  const senderLabel = gift.from_role === 'admin' ? 'Tilki 🦊' : 'Tavşan 🐰';
+
+  return (
+    <>
+      <TouchableOpacity onPress={handleOpen} activeOpacity={0.8} style={gf.wrapper}>
+        <Animated.View style={[gf.box, { transform: [{ scale: bounceAnim }, { translateX: shakeAnim }] }]}>
+          <LinearGradient colors={['#ff8fa3', '#ff6b8a']} style={gf.gradient}>
+            <Text style={gf.boxEmoji}>{opened ? '✨' : '🎁'}</Text>
+            <Text style={gf.boxTitle}>{opened ? 'Açıldı!' : 'Sana bir hediye!'}</Text>
+            <Text style={gf.boxSub}>{opened ? '' : `${senderLabel} bir şey bıraktı 🎀`}</Text>
+            {!opened && <Text style={gf.boxHint}>Açmak için dokun</Text>}
+          </LinearGradient>
+        </Animated.View>
+      </TouchableOpacity>
+
+      {/* Mesaj Modal */}
+      <Modal visible={showMessage} transparent animationType="fade" onRequestClose={handleClose}>
+        <View style={gf.overlay}>
+          <Animated.View style={[gf.messageCard, { opacity: fadeAnim, transform: [{ scale: fadeAnim }] }]}>
+            <Text style={gf.messageFrom}>{senderLabel} sana yazdı 💌</Text>
+            <Text style={gf.messageText}>{gift.message}</Text>
+            <TouchableOpacity style={gf.closeBtn} onPress={handleClose}>
+              <Text style={gf.closeBtnText}>Kapat 🌸</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
+    </>
+  );
+}
+
+// ── Counter Widget ────────────────────────────────────────────────────────────
 function CounterUnit({ value, label }: { value: number; label: string }) {
   return (
     <View style={cs.unit}>
@@ -52,15 +122,23 @@ function CounterUnit({ value, label }: { value: number; label: string }) {
   );
 }
 
-function LoveHeader({ role, onLogout, onManage, onEnableNotif, notifEnabled }: {
+function LoveHeader({ role, onLogout, onManage, onEnableNotif, notifEnabled, onReset, counter }: {
   role: string; onLogout: () => void; onManage: () => void;
   onEnableNotif: () => void; notifEnabled: boolean;
+  onReset: () => void;
+  counter: { days: number; hours: number; minutes: number; seconds: number };
 }) {
-  const { days, hours, minutes, seconds } = useLoveCounter();
   const fadeIn = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 800, useNativeDriver: true }).start();
   }, []);
+
+  const handleReset = () => {
+    const msg = 'Sayaç sıfırlansın mı? İkimiz de sıfırdan başlarız 🥰';
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) onReset();
+    }
+  };
 
   return (
     <Animated.View style={{ opacity: fadeIn }}>
@@ -68,15 +146,19 @@ function LoveHeader({ role, onLogout, onManage, onEnableNotif, notifEnabled }: {
         <Text style={cs.headerTitle}>Tavşan 🐰</Text>
         <Text style={cs.headerPoem}>Every second with you is a memory I keep forever</Text>
         <View style={cs.counterRow}>
-          <CounterUnit value={days}    label="days"    />
+          <CounterUnit value={counter.days}    label="days"    />
           <Text style={cs.sep}>:</Text>
-          <CounterUnit value={hours}   label="hours"   />
+          <CounterUnit value={counter.hours}   label="hours"   />
           <Text style={cs.sep}>:</Text>
-          <CounterUnit value={minutes} label="min"     />
+          <CounterUnit value={counter.minutes} label="min"     />
           <Text style={cs.sep}>:</Text>
-          <CounterUnit value={seconds} label="sec"     />
+          <CounterUnit value={counter.seconds} label="sec"     />
         </View>
         <Text style={cs.headerSub}>of us ❤️ since Jan 28, 2026</Text>
+        {/* Sıfırla butonu — küçük, altında */}
+        <TouchableOpacity onPress={handleReset} style={cs.resetBtn}>
+          <Text style={cs.resetText}>⏱ Sayacı Sıfırla</Text>
+        </TouchableOpacity>
         <View style={cs.headerActions}>
           {role === 'admin' && (
             <TouchableOpacity style={cs.chip} onPress={onManage}>
@@ -97,6 +179,7 @@ function LoveHeader({ role, onLogout, onManage, onEnableNotif, notifEnabled }: {
   );
 }
 
+// ── Memory Card ───────────────────────────────────────────────────────────────
 function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
   const scale = useRef(new Animated.Value(1)).current;
   const onPressIn  = () => Animated.spring(scale, { toValue: 0.96, useNativeDriver: true }).start();
@@ -108,9 +191,7 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
     <Animated.View style={{ transform: [{ scale }] }}>
       <TouchableOpacity style={ms.card} onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} activeOpacity={1}>
         <Image source={{ uri: item.mediaUrl || mediaUrl(item.fileId) }} style={ms.thumb} resizeMode="cover" />
-        {item.fileType === 'video' && (
-          <View style={ms.playBadge}><Text style={ms.playIcon}>▶</Text></View>
-        )}
+        {item.fileType === 'video' && <View style={ms.playBadge}><Text style={ms.playIcon}>▶</Text></View>}
         <LinearGradient colors={['transparent', 'rgba(201,24,74,0.75)']} style={ms.overlay} />
         {!!item.caption && <Text style={ms.caption} numberOfLines={2}>{item.caption}</Text>}
         {!!dateLabel && <Text style={ms.date}>{dateLabel}</Text>}
@@ -119,10 +200,11 @@ function MemoryCard({ item, onPress }: { item: Memory; onPress: () => void }) {
   );
 }
 
+// ── Full-screen Viewer ────────────────────────────────────────────────────────
 function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: string; onClose: () => void }) {
-  const [comments,     setComments]    = useState<Comment[]>([]);
-  const [commentText,  setCommentText] = useState('');
-  const [sending,      setSending]     = useState(false);
+  const [comments,    setComments]    = useState<Comment[]>([]);
+  const [commentText, setCommentText] = useState('');
+  const [sending,     setSending]     = useState(false);
   const [showComments, setShowComments] = useState(false);
 
   useEffect(() => { if (memory) loadComments(); }, [memory]);
@@ -153,52 +235,33 @@ function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: s
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={vw.container}>
-        {/* Fotoğraf tam ekran */}
         {memory.fileType === 'video' ? (
           <Video source={{ uri: memory.mediaUrl || mediaUrl(memory.fileId) }} style={vw.image} useNativeControls resizeMode={ResizeMode.CONTAIN} shouldPlay />
         ) : (
           <Image source={{ uri: memory.mediaUrl || mediaUrl(memory.fileId) }} style={vw.image} resizeMode="contain" />
         )}
-
-        {/* Kapat butonu */}
         <TouchableOpacity style={vw.close} onPress={onClose}>
           <Text style={vw.closeText}>✕</Text>
         </TouchableOpacity>
-
-        {/* Sağ taraf ikonlar */}
         <View style={vw.sideBar}>
           <TouchableOpacity style={vw.sideBtn} onPress={() => setShowComments(true)}>
             <Text style={vw.sideBtnIcon}>💬</Text>
-            {comments.length > 0 && (
-              <View style={vw.badge}>
-                <Text style={vw.badgeText}>{comments.length}</Text>
-              </View>
-            )}
+            {comments.length > 0 && <View style={vw.badge}><Text style={vw.badgeText}>{comments.length}</Text></View>}
           </TouchableOpacity>
         </View>
-
-        {/* Alt bilgi: caption + tarih */}
         {(!!memory.caption || !!memory.date) && (
           <View style={vw.infoBar}>
             {!!memory.caption && <Text style={vw.captionText}>{memory.caption}</Text>}
-            {!!memory.date && (
-              <Text style={vw.dateText}>
-                {new Date(memory.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
-              </Text>
-            )}
+            {!!memory.date && <Text style={vw.dateText}>{new Date(memory.date).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>}
           </View>
         )}
-
-        {/* Yorum Paneli - alttan kayar */}
         <Modal visible={showComments} transparent animationType="slide" onRequestClose={() => setShowComments(false)}>
           <TouchableOpacity style={vw.commentOverlay} activeOpacity={1} onPress={() => setShowComments(false)} />
           <View style={vw.commentPanel}>
             <View style={vw.commentHandle} />
             <Text style={vw.commentPanelTitle}>💬 Yorumlar</Text>
             <ScrollView style={vw.commentList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              {comments.length === 0 && (
-                <Text style={vw.commentEmpty}>Henüz yorum yok 🌸</Text>
-              )}
+              {comments.length === 0 && <Text style={vw.commentEmpty}>Henüz yorum yok 🌸</Text>}
               {comments.map(c => (
                 <View key={c.id} style={[vw.commentBubble, c.role === role ? vw.commentBubbleSelf : vw.commentBubbleOther]}>
                   <Text style={vw.commentRole}>{c.role === 'admin' ? '🦊' : '🐰'}</Text>
@@ -226,16 +289,8 @@ function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: s
               ))}
             </ScrollView>
             <View style={vw.commentInput}>
-              <TextInput
-                style={vw.commentInputText}
-                placeholder="Yorum yaz..."
-                placeholderTextColor="#ffb3c1"
-                value={commentText}
-                onChangeText={setCommentText}
-                onSubmitEditing={handleSendComment}
-                returnKeyType="send"
-                autoFocus
-              />
+              <TextInput style={vw.commentInputText} placeholder="Yorum yaz..." placeholderTextColor="#ffb3c1"
+                value={commentText} onChangeText={setCommentText} onSubmitEditing={handleSendComment} returnKeyType="send" autoFocus />
               <TouchableOpacity onPress={handleSendComment} disabled={sending} style={vw.commentSendBtn}>
                 <Text style={vw.commentSendText}>{sending ? '...' : '↑'}</Text>
               </TouchableOpacity>
@@ -247,20 +302,26 @@ function MediaViewer({ memory, role, onClose }: { memory: Memory | null; role: s
   );
 }
 
+// ── Gallery Screen ────────────────────────────────────────────────────────────
 export default function GalleryScreen() {
   const router = useRouter();
+  const { counter, resetCounter } = useLoveCounter();
   const [role,            setRole]          = useState('user');
   const [memories,        setMemories]      = useState<Memory[]>([]);
   const [refreshing,      setRefresh]       = useState(false);
   const [selected,        setSelected]      = useState<Memory | null>(null);
   const [status,          setStatus]        = useState({ emoji: '🐰', text: '' });
   const [song,            setSong]          = useState({ url: '', title: '' });
+  const [gift,            setGift]          = useState<Gift | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showSongModal,   setShowSongModal]   = useState(false);
+  const [showGiftModal,   setShowGiftModal]   = useState(false);
   const [newEmoji,        setNewEmoji]      = useState('');
   const [newText,         setNewText]       = useState('');
   const [newSongUrl,      setNewSongUrl]    = useState('');
   const [newSongTitle,    setNewSongTitle]  = useState('');
+  const [giftMessage,     setGiftMessage]   = useState('');
+  const [sendingGift,     setSendingGift]   = useState(false);
   const [notifEnabled,    setNotifEnabled]  = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile,      setUploadFile]    = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -276,20 +337,47 @@ export default function GalleryScreen() {
       loadMemories();
       loadStatus();
       loadSong();
+      loadGift(r);
       if (Platform.OS === 'web' && 'Notification' in window) {
         setNotifEnabled(Notification.permission === 'granted');
       }
     })();
   }, []);
 
+  const loadGift = async (r: string) => {
+    try {
+      const res  = await fetch(`${API_BASE}/api/gift?role=${r}`);
+      const data = await res.json();
+      setGift(data.gift || null);
+    } catch (e) {}
+  };
+
+  const handleSendGift = async () => {
+    if (!giftMessage.trim()) return;
+    setSendingGift(true);
+    try {
+      await fetch(`${API_BASE}/api/gift`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: giftMessage, role }),
+      });
+      setGiftMessage('');
+      setShowGiftModal(false);
+      if (Platform.OS === 'web') window.alert('Hediye gönderildi! 🎁');
+    } catch (e) {} finally { setSendingGift(false); }
+  };
+
   const handleEnableNotif = async () => {
     const success = await registerPush(role);
     if (success) setNotifEnabled(true);
   };
 
+  const handleReset = async () => {
+    await resetCounter(role);
+  };
+
   const loadStatus = async () => {
     try {
-      const res  = await fetch(`${API_BASE}/api/status`);
+      const res = await fetch(`${API_BASE}/api/status`);
       const data = await res.json();
       setStatus({ emoji: data.emoji || '🐰', text: data.text || '' });
     } catch (e) {}
@@ -297,7 +385,7 @@ export default function GalleryScreen() {
 
   const loadSong = async () => {
     try {
-      const res  = await fetch(`${API_BASE}/api/song`);
+      const res = await fetch(`${API_BASE}/api/song`);
       const data = await res.json();
       setSong({ url: data.url || '', title: data.title || '' });
     } catch (e) {}
@@ -327,13 +415,8 @@ export default function GalleryScreen() {
   };
 
   const handlePickUpload = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.85,
-    });
-    if (!result.canceled && result.assets.length > 0) {
-      setUploadFile(result.assets[0]);
-    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
+    if (!result.canceled && result.assets.length > 0) setUploadFile(result.assets[0]);
   };
 
   const handleUserUpload = async () => {
@@ -341,11 +424,8 @@ export default function GalleryScreen() {
     setUploading(true);
     try {
       const form = new FormData();
-
-      // ✅ mimeType'ı Expo'dan al — mobilde URI blob: olabiliyor, extension güvenilmez
       const mime = uploadFile.mimeType || 'image/jpeg';
       const ext  = mime.split('/')[1] || 'jpg';
-
       if (Platform.OS === 'web') {
         const response = await fetch(uploadFile.uri);
         const blob = await response.blob();
@@ -356,14 +436,9 @@ export default function GalleryScreen() {
       }
       form.append('caption', uploadCaption);
       form.append('date', uploadDate || new Date().toISOString());
-
-      // ✅ Doğru endpoint
       const res = await fetch(`${API_BASE}/api/memories`, { method: 'POST', body: form });
       if (!res.ok) throw new Error('Upload failed');
-
-      setUploadFile(null);
-      setUploadCaption('');
-      setUploadDate('');
+      setUploadFile(null); setUploadCaption(''); setUploadDate('');
       setShowUploadModal(false);
       loadMemories();
     } catch (e: any) {
@@ -377,15 +452,12 @@ export default function GalleryScreen() {
       const res  = await fetch(`${API_BASE}/api/memories`);
       const data = await res.json();
       setMemories(Array.isArray(data) ? data : []);
-    } catch (e) { console.error('load memories error', e); }
-    finally { setRefresh(false); }
+    } catch (e) {} finally { setRefresh(false); }
   }, []);
 
   const handleLogout = async () => { await storage.clear(); router.replace('/login'); };
   const handleManage = () => router.push('/manage');
-  const renderItem = ({ item }: { item: Memory }) => (
-    <MemoryCard item={item} onPress={() => setSelected(item)} />
-  );
+  const renderItem = ({ item }: { item: Memory }) => <MemoryCard item={item} onPress={() => setSelected(item)} />;
 
   const embedUrl = song.url ? getEmbedUrl(song.url) : null;
   const STATUS_EMOJIS = ['😭', '😍', '🥰', '💕', '😴', '🥱', '🌸', '✨', '💔', '🧡'];
@@ -394,66 +466,66 @@ export default function GalleryScreen() {
     <View style={gs.container}>
       <StatusBar barStyle="light-content" />
 
+      {/* Mod Modal */}
       <Modal visible={showStatusModal} transparent animationType="slide" onRequestClose={() => setShowStatusModal(false)}>
-        <View style={md.overlay}>
-          <View style={md.card}>
-            <Text style={md.title}>Modunu Güncelle</Text>
-            <View style={md.emojiRow}>
-              {STATUS_EMOJIS.map(e => (
-                <TouchableOpacity key={e} onPress={() => setNewEmoji(e)} style={[md.emojiBtn, newEmoji === e && md.emojiBtnActive]}>
-                  <Text style={md.emojiText}>{e}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TextInput style={md.input} placeholder="Kısa mesaj (opsiyonel)" placeholderTextColor="#ffb3c1" value={newText} onChangeText={setNewText} />
-            <TouchableOpacity style={md.saveBtn} onPress={handleSaveStatus}>
-              <Text style={md.saveBtnText}>Kaydet ✨</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowStatusModal(false)}>
-              <Text style={md.cancelText}>İptal</Text>
-            </TouchableOpacity>
+        <View style={md.overlay}><View style={md.card}>
+          <Text style={md.title}>Modunu Güncelle</Text>
+          <View style={md.emojiRow}>
+            {STATUS_EMOJIS.map(e => (
+              <TouchableOpacity key={e} onPress={() => setNewEmoji(e)} style={[md.emojiBtn, newEmoji === e && md.emojiBtnActive]}>
+                <Text style={md.emojiText}>{e}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        </View>
+          <TextInput style={md.input} placeholder="Kısa mesaj (opsiyonel)" placeholderTextColor="#ffb3c1" value={newText} onChangeText={setNewText} />
+          <TouchableOpacity style={md.saveBtn} onPress={handleSaveStatus}><Text style={md.saveBtnText}>Kaydet ✨</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowStatusModal(false)}><Text style={md.cancelText}>İptal</Text></TouchableOpacity>
+        </View></View>
       </Modal>
 
+      {/* Şarkı Modal */}
       <Modal visible={showSongModal} transparent animationType="slide" onRequestClose={() => setShowSongModal(false)}>
-        <View style={md.overlay}>
-          <View style={md.card}>
-            <Text style={md.title}>🎵 Günün Şarkısı</Text>
-            <TextInput style={md.input} placeholder="Spotify veya YouTube linki" placeholderTextColor="#ffb3c1" value={newSongUrl} onChangeText={setNewSongUrl} autoCapitalize="none" />
-            <TextInput style={md.input} placeholder="Şarkı adı (opsiyonel)" placeholderTextColor="#ffb3c1" value={newSongTitle} onChangeText={setNewSongTitle} />
-            <TouchableOpacity style={md.saveBtn} onPress={handleSaveSong}>
-              <Text style={md.saveBtnText}>Paylaş 🎵</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowSongModal(false)}>
-              <Text style={md.cancelText}>İptal</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <View style={md.overlay}><View style={md.card}>
+          <Text style={md.title}>🎵 Günün Şarkısı</Text>
+          <TextInput style={md.input} placeholder="Spotify veya YouTube linki" placeholderTextColor="#ffb3c1" value={newSongUrl} onChangeText={setNewSongUrl} autoCapitalize="none" />
+          <TextInput style={md.input} placeholder="Şarkı adı (opsiyonel)" placeholderTextColor="#ffb3c1" value={newSongTitle} onChangeText={setNewSongTitle} />
+          <TouchableOpacity style={md.saveBtn} onPress={handleSaveSong}><Text style={md.saveBtnText}>Paylaş 🎵</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowSongModal(false)}><Text style={md.cancelText}>İptal</Text></TouchableOpacity>
+        </View></View>
       </Modal>
 
-      {/* ✅ Esma Upload Modal — tarih alanı eklendi */}
+      {/* Hediye Gönder Modal */}
+      <Modal visible={showGiftModal} transparent animationType="slide" onRequestClose={() => setShowGiftModal(false)}>
+        <View style={md.overlay}><View style={md.card}>
+          <Text style={md.title}>🎁 Hediye Bırak</Text>
+          <TextInput style={[md.input, { minHeight: 100, textAlignVertical: 'top' }]}
+            placeholder="Sevgilime bir şeyler yaz... 💌" placeholderTextColor="#ffb3c1"
+            value={giftMessage} onChangeText={setGiftMessage} multiline />
+          <TouchableOpacity style={[md.saveBtn, sendingGift && { opacity: 0.6 }]} onPress={handleSendGift} disabled={sendingGift}>
+            <Text style={md.saveBtnText}>{sendingGift ? 'Gönderiliyor...' : 'Gönder 🎀'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowGiftModal(false)}><Text style={md.cancelText}>İptal</Text></TouchableOpacity>
+        </View></View>
+      </Modal>
+
+      {/* Esma Upload Modal */}
       <Modal visible={showUploadModal} transparent animationType="slide" onRequestClose={() => setShowUploadModal(false)}>
-        <View style={md.overlay}>
-          <View style={md.card}>
-            <Text style={md.title}>📸 Anı Ekle</Text>
-            <TouchableOpacity style={sw.uploadPicker} onPress={handlePickUpload}>
-              {uploadFile ? (
-                <Image source={{ uri: uploadFile.uri }} style={{ width: '100%', height: 160, borderRadius: 12 }} resizeMode="cover" />
-              ) : (
-                <Text style={{ color: '#ffb3c1', fontSize: 14 }}>Fotoğraf seç 📷</Text>
-              )}
-            </TouchableOpacity>
-            <TextInput style={md.input} placeholder="Açıklama (opsiyonel)" placeholderTextColor="#ffb3c1" value={uploadCaption} onChangeText={setUploadCaption} />
-            <TextInput style={md.input} placeholder="Tarih (YYYY-MM-DD, opsiyonel)" placeholderTextColor="#ffb3c1" value={uploadDate} onChangeText={setUploadDate} />
-            <TouchableOpacity style={[md.saveBtn, uploading && { opacity: 0.6 }]} onPress={handleUserUpload} disabled={uploading}>
-              <Text style={md.saveBtnText}>{uploading ? 'Yükleniyor...' : 'Yükle ✨'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowUploadModal(false)}>
-              <Text style={md.cancelText}>İptal</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <View style={md.overlay}><View style={md.card}>
+          <Text style={md.title}>📸 Anı Ekle</Text>
+          <TouchableOpacity style={sw.uploadPicker} onPress={handlePickUpload}>
+            {uploadFile ? (
+              <Image source={{ uri: uploadFile.uri }} style={{ width: '100%', height: 160, borderRadius: 12 }} resizeMode="cover" />
+            ) : (
+              <Text style={{ color: '#ffb3c1', fontSize: 14 }}>Fotoğraf seç 📷</Text>
+            )}
+          </TouchableOpacity>
+          <TextInput style={md.input} placeholder="Açıklama (opsiyonel)" placeholderTextColor="#ffb3c1" value={uploadCaption} onChangeText={setUploadCaption} />
+          <TextInput style={md.input} placeholder="Tarih (YYYY-MM-DD, opsiyonel)" placeholderTextColor="#ffb3c1" value={uploadDate} onChangeText={setUploadDate} />
+          <TouchableOpacity style={[md.saveBtn, uploading && { opacity: 0.6 }]} onPress={handleUserUpload} disabled={uploading}>
+            <Text style={md.saveBtnText}>{uploading ? 'Yükleniyor...' : 'Yükle ✨'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowUploadModal(false)}><Text style={md.cancelText}>İptal</Text></TouchableOpacity>
+        </View></View>
       </Modal>
 
       <FlatList
@@ -465,7 +537,20 @@ export default function GalleryScreen() {
         contentContainerStyle={gs.list}
         ListHeaderComponent={
           <>
-            <LoveHeader role={role} onLogout={handleLogout} onManage={handleManage} onEnableNotif={handleEnableNotif} notifEnabled={notifEnabled} />
+            <LoveHeader role={role} onLogout={handleLogout} onManage={handleManage}
+              onEnableNotif={handleEnableNotif} notifEnabled={notifEnabled}
+              onReset={handleReset} counter={counter} />
+
+            {/* Hediye Kutusu — varsa göster */}
+            {gift && <GiftBox gift={gift} role={role} onOpened={() => setGift(null)} />}
+
+            {/* Hediye Gönder Butonu */}
+            <TouchableOpacity style={sw.giftCard} onPress={() => setShowGiftModal(true)}>
+              <Text style={sw.giftIcon}>🎁</Text>
+              <Text style={sw.giftText}>Hediye Bırak</Text>
+            </TouchableOpacity>
+
+            {/* Mod Widget */}
             <TouchableOpacity style={sw.statusCard} onPress={() => { setNewEmoji(status.emoji); setNewText(status.text); setShowStatusModal(true); }} activeOpacity={0.8}>
               <Text style={sw.statusEmoji}>{status.emoji}</Text>
               <View style={sw.statusInfo}>
@@ -474,6 +559,8 @@ export default function GalleryScreen() {
               </View>
               <Text style={sw.statusEdit}>✏️</Text>
             </TouchableOpacity>
+
+            {/* Şarkı Widget */}
             <View style={sw.songCard}>
               <View style={sw.songInfo}>
                 <Text style={sw.songLabel}>🎵 Günün Şarkısı</Text>
@@ -489,19 +576,15 @@ export default function GalleryScreen() {
                 <Text style={sw.songBtnText}>Seç</Text>
               </TouchableOpacity>
             </View>
-            {/* ✅ Embed küçük + pembe arka plan */}
+
             {embedUrl && Platform.OS === 'web' && (
               <View style={sw.embedCard}>
-                <iframe
-                  src={embedUrl}
-                  width="100%"
-                  height={embedUrl.includes('spotify') ? '80' : '100'}
-                  frameBorder="0"
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  style={{ borderRadius: 12, display: 'block', colorScheme: 'light' }}
-                />
+                <iframe src={embedUrl} width="100%" height={embedUrl.includes('spotify') ? '80' : '100'}
+                  frameBorder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                  style={{ borderRadius: 12, display: 'block', colorScheme: 'light' }} />
               </View>
             )}
+
             {role === 'user' && (
               <TouchableOpacity style={sw.uploadCard} onPress={() => setShowUploadModal(true)}>
                 <Text style={sw.uploadIcon}>📸</Text>
@@ -524,8 +607,26 @@ export default function GalleryScreen() {
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
+const gf = StyleSheet.create({
+  wrapper:     { marginHorizontal: 12, marginTop: 10 },
+  box:         { borderRadius: 20, overflow: 'hidden' },
+  gradient:    { padding: 20, alignItems: 'center' },
+  boxEmoji:    { fontSize: 48, marginBottom: 6 },
+  boxTitle:    { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 4 },
+  boxSub:      { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginBottom: 6 },
+  boxHint:     { fontSize: 11, color: 'rgba(255,255,255,0.7)', fontStyle: 'italic' },
+  overlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  messageCard: { backgroundColor: '#fff', borderRadius: 24, padding: 28, width: '100%', alignItems: 'center',
+                 shadowColor: '#ff8fa3', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
+  messageFrom: { fontSize: 14, color: '#ff8fa3', marginBottom: 16, fontStyle: 'italic' },
+  messageText: { fontSize: 18, color: '#c9184a', fontWeight: '600', textAlign: 'center', lineHeight: 28, marginBottom: 24 },
+  closeBtn:    { backgroundColor: '#ff6b8a', borderRadius: 14, paddingHorizontal: 28, paddingVertical: 12 },
+  closeBtnText:{ color: '#fff', fontWeight: '700', fontSize: 15 },
+});
+
 const cs = StyleSheet.create({
-  header:        { paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingBottom: 24, paddingHorizontal: 20, alignItems: 'center' },
+  header:        { paddingTop: Platform.OS === 'ios' ? 56 : 40, paddingBottom: 20, paddingHorizontal: 20, alignItems: 'center' },
   headerTitle:   { fontSize: 26, fontWeight: '800', color: '#fff', letterSpacing: 1, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' },
   headerPoem:    { fontSize: 12, color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', marginTop: 4, textAlign: 'center' },
   counterRow:    { flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 4 },
@@ -534,7 +635,9 @@ const cs = StyleSheet.create({
   label:         { fontSize: 10, color: 'rgba(255,255,255,0.8)', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 },
   sep:           { fontSize: 22, fontWeight: '800', color: 'rgba(255,255,255,0.6)', marginTop: -4 },
   headerSub:     { fontSize: 12, color: 'rgba(255,255,255,0.9)', marginTop: 8, fontStyle: 'italic' },
-  headerActions: { flexDirection: 'row', gap: 10, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' },
+  resetBtn:      { marginTop: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 6 },
+  resetText:     { fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
+  headerActions: { flexDirection: 'row', gap: 10, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' },
   chip:          { backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   chipGhost:     { backgroundColor: 'rgba(255,255,255,0.5)' },
   chipNotif:     { backgroundColor: 'rgba(255,255,255,0.95)' },
@@ -561,7 +664,10 @@ const gs = StyleSheet.create({
 });
 
 const sw = StyleSheet.create({
-  statusCard:   { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', marginHorizontal: 12, marginTop: 10, borderRadius: 16, padding: 14, shadowColor: '#ff8fa3', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
+  giftCard:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff0f3', borderWidth: 1.5, borderColor: '#ffd6e0', borderStyle: 'dashed' as any, marginHorizontal: 12, marginTop: 8, borderRadius: 16, padding: 12, gap: 8 },
+  giftIcon:     { fontSize: 20 },
+  giftText:     { color: '#ff8fa3', fontWeight: '700', fontSize: 14 },
+  statusCard:   { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', marginHorizontal: 12, marginTop: 8, borderRadius: 16, padding: 14, shadowColor: '#ff8fa3', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 3 },
   statusEmoji:  { fontSize: 32, marginRight: 12 },
   statusInfo:   { flex: 1 },
   statusLabel:  { fontSize: 11, color: '#ffb3c1', textTransform: 'uppercase', letterSpacing: 0.5 },
